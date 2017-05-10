@@ -25,6 +25,16 @@ from zope.i18nmessageid import MessageFactory
 from zope.interface import implementer
 import calendar
 import json
+from bda.plone.cart import get_item_stock
+from plone.event.interfaces import IOccurrence
+import datetime
+from Acquisition import aq_parent
+from bda.plone.ticketshop.interfaces import IBuyableEvent
+from plone.app.event.base import start_end_from_mode
+from plone.app.event.base import RET_MODE_ACCESSORS
+from plone.app.event.base import guess_date_from
+from bda.plone.ticketshop.interfaces import ITicketOccurrenceData
+from bda.plone.ticketshop.interfaces import ITicket
 
 try:
     from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
@@ -121,11 +131,12 @@ class Renderer(base.Renderer):
 
         self.calendar_url = get_calendar_url(context, self.search_base_path)
 
-        self.year, self.month = year, month = self.year_month_display()
+        self.year, self.month, self.date = year, month, date = self._year_month_date_display_patch()
         self.prev_year, self.prev_month = prev_year, prev_month = (
             self.get_previous_month(year, month))
         self.next_year, self.next_month = next_year, next_month = (
             self.get_next_month(year, month))
+        
         self.prev_query = '?month=%s&year=%s' % (prev_month, prev_year)
         self.next_query = '?month=%s&year=%s' % (next_month, next_year)
 
@@ -145,6 +156,33 @@ class Renderer(base.Renderer):
                  default=self._ts.weekday_english(day, format='a'))
             for day in strftime_wkdays
         ]
+
+    def _year_month_date_display_patch(self):
+        """ Return the year, month and day to display in the calendar.
+        """
+        context = aq_inner(self.context)
+        request = self.request
+
+        # Try to get year and month from request
+        year = request.get('year', None)
+        month = request.get('month', None)
+        date = request.get('date', None)
+
+        # Or use current date
+        today = localized_today(context)
+        if not year:
+            year = today.year
+        if not month:
+            month = today.month
+
+        # try to transform to number but fall back to current
+        # date if this is ambiguous
+        try:
+            year, month = int(year), int(month)
+        except (TypeError, ValueError):
+            year, month = today.year, today.month
+
+        return year, month, date
 
     def year_month_display(self):
         """ Return the year and month to display in the calendar.
@@ -188,6 +226,86 @@ class Renderer(base.Renderer):
 
     def date_events_url(self, date):
         return '%s?mode=day&date=%s' % (self.calendar_url, date)
+
+    def _date_events_url_patch(self):
+        return '%s?mode=day&date=%s&ajax_load=1' % (self.calendar_url, self.date)
+
+    def _get_events(self):
+        import urllib
+        f = urllib.urlopen(self._date_events_url_patch())
+        html = f.read()
+        return html
+
+    def _get_occs(self):
+        date = guess_date_from(self.date)
+        if date:
+            start, end = start_end_from_mode('day', date, self.context)
+            query = {}
+            query['review_state'] = self.data.state
+            
+            search_base_path = self.search_base_path
+            if search_base_path:
+                query['path'] = {'query': search_base_path}
+
+            list_events = []
+            events = get_events(self.context, start=start, end=end, sort='start', sort_reverse=False, ret_mode=RET_MODE_OBJECTS, expand=True, **query)
+
+            today = datetime.datetime.today().date()
+
+            for occ in events:
+                if IOccurrence.providedBy(occ):
+                    occurrence_id = occ.id
+                    event = aq_parent(occ)
+                    occ_data = ITicketOccurrenceData(event)
+                    occs = occ_data.ticket_occurrences(occurrence_id)
+                    if occs:
+                        occurrence_ticket = occs[0]
+                        item_stock = get_item_stock(occurrence_ticket)
+                        if item_stock:
+                            stock = item_stock.available
+                        else:
+                            stock = 0
+
+                        is_today = occ.start.date() == today
+                        
+                        new_event = {
+                            "start": occ.start,
+                            "uid": occurrence_ticket.UID(),
+                            "stock": stock,
+                            "is_today": is_today
+                        }
+                        list_events.append(new_event)
+                        
+                elif IBuyableEvent.providedBy(occ):
+                    occ_data = ITicketOccurrenceData(occ)
+                    occs = occ_data.tickets
+                    if occs:
+                        occurrence_ticket = occs[0]
+                        item_stock = get_item_stock(occurrence_ticket)
+                        if item_stock:
+                            stock = item_stock.available
+                        else:
+                            stock = 0
+                        
+                        is_today = occ.start.date() == today
+  
+                        new_event = {
+                            "start": occ.start,
+                            "uid": occurrence_ticket.UID(),
+                            "stock": stock,
+                            "is_today": is_today
+                        }
+                        list_events.append(new_event)
+                else:
+                    print 'NOT AVAILABLE'
+
+            return list_events
+        else:
+            return []
+
+    def date_query(self, date):
+        query = '?month=%s&year=%s&date=%s' % (self.month, self.year, date)
+        return query
 
     @property
     def cal_data(self):
@@ -240,7 +358,8 @@ class Renderer(base.Renderer):
                                 ret_mode=RET_MODE_OBJECTS,
                                 expand=True, **query)
 
-        cal_dict = construct_calendar(events, start=start, end=end)
+        #today += datetime.timedelta(days=1)
+        cal_dict = construct_calendar(events, start=today, end=end)
 
         # [[day1week1, day2week1, ... day7week1], [day1week2, ...]]
         caldata = [[]]
@@ -258,6 +377,7 @@ class Renderer(base.Renderer):
                     accessor = IEventAccessor(occ)
                     location = accessor.location
                     whole_day = accessor.whole_day
+
                     time = accessor.start.time().strftime('%H:%M')
                     # TODO: make 24/12 hr format configurable
                     events_string_list.append(
@@ -268,7 +388,6 @@ class Renderer(base.Renderer):
                             u' {0}'.format(location) if location else u''
                         )
                     )
-
             caldata[-1].append(
                 {'date': dat,
                  'day': dat.day,
@@ -289,6 +408,15 @@ class Renderer(base.Renderer):
                 getSite().absolute_url(),
                 self.hash,
                 year, month),
+            'target': '#portletwrapper-%s > *' % self.hash
+        })
+
+    def _nav_pattern_options_date(self, year, month, date):
+        return json.dumps({
+            'url': '%s/@@render-portlet?portlethash=%s&year=%s&month=%s&date=%s' % (
+                getSite().absolute_url(),
+                self.hash,
+                year, month, date),
             'target': '#portletwrapper-%s > *' % self.hash
         })
 

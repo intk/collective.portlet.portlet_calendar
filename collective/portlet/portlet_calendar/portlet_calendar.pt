@@ -7,6 +7,7 @@
     tal:define="navigation_root_url context/@@plone_portal_state/navigation_root_url;
                 month view/month;
                 year view/year;">
+  <p class="visit-msg" i18n:domain="bda.plone.cart" i18n:translate="calendar_pre_text">Wanneer wil je <span class="lorentz-span">De Lorentz Formule</span> in het Lorentz Lab beleven?</p>
 
   <header class="portletHeader">
     <a href="#" rel="nofollow" class="calendarPrevious pat-contentloader" title="Previous month"
@@ -56,8 +57,9 @@
                           prev_month day/prev_month;
                           events day/events;
                           limit python:len(events) if events is not None else 0"
-              tal:attributes="class python:u'event%s%s%s%s' %
+              tal:attributes="class python:u'event%s%s%s%s%s' %
                           ((' today' if today else ''),
+                          (' selected today' if day['date_string'] == view.date else ''),
                           (' cal_next_month' if next_month else ''),
                           (' cal_prev_month' if prev_month else ''),
                           (' cal_has_events' if events else ''))">
@@ -66,17 +68,114 @@
                 tal:condition="not:events"
                 tal:content="day/day"></span>
             <a href=""
+                class="calendarNext pat-contentloader"
                 tal:condition="events"
-                tal:attributes="href python:view.date_events_url(day['date_string']);
-                                title day/events_string;"
-                
+                tal:attributes="href python:view.date_query(day['date_string']);
+                                title day/events_string;
+                                data-year year;
+                                data-month month;
+                                data-pat-contentloader python: view._nav_pattern_options_date(year, month, day['date_string'])"
                 tal:content="day/day">31</a>
-
           </td>
           </tal:block>
         </tr>
       </tbody>
     </table>
+
+    <div class="event-listing table-time" tal:condition="view/date">
+      <p i18n:translate="choose_timeslot">Op welk tijdstip wil je het museum bezoeken?</p>
+      <tal:occs tal:define="occs view/_get_occs">
+        <tal:occ tal:repeat="occ occs">
+          <div class="timeslot">
+            <tal:today tal:condition="python: occ.get('is_today', '') == False">
+              <a href="#"
+                tal:attributes="class python:'time-row %s %s %s' %
+                                              (('time-ua' if occ['stock'] == 0 else ''),
+                                              ('time-free' if occ['stock'] > 10 else ''),
+                                              ('time-busy' if occ['stock'] > 0 and occ['stock'] <= 10 else ''));
+                                data-uid python: occ['uid']; data-stock python: occ['stock'];"
+                tal:content="python: occ['start'].strftime('%H:%M')"></a>
+                <!--<p><span tal:content="python:occ['stock']"></span></p>-->
+            </tal:today>
+            <tal:nottoday tal:condition="python: occ.get('is_today', '') == True">
+              <a href="#"
+                tal:attributes="class python:'time-row time-ua time-disabled';
+                                data-uid python: occ['uid']; data-stock python: occ['stock'];"
+                tal:content="python: occ['start'].strftime('%H:%M')"></a>
+            </tal:nottoday>
+          </div>
+        </tal:occ>
+      </tal:occs>
+
+      <script>
+        window.ajax_req = null;
+        var stock_busy = 10;
+        var default_event_uid = "0c02168b45214f1ca581d9bd5aadbb6c";
+        if ($('.recurrent-event').length == 1) {
+          $('.recurrent-event').removeClass('disable');
+        }
+        var r_event = $('.recurrent-event:not(.disable)');
+        var r_event_uid = $(r_event).data('uid');
+        var r_count = $(r_event).find('select').val();
+        
+        $('.time-row:not(.time-ua)').each(function() {
+          if (parseInt(r_count) > $(this).data('stock')) {
+            $(this).addClass('time-ua');
+          } else if ($(this).data('stock') - parseInt(r_count) <= stock_busy) {
+            $(this).addClass('time-busy');
+          } else {
+
+          }
+        });
+
+        if (r_event_uid != default_event_uid) {
+          var r_next_params = {
+            'uid': default_event_uid,
+            'reset_uid': r_event_uid,
+            'count': r_count + '',
+            'comment': ''
+          }
+          bda_plone_cart.update_timeslot(r_next_params);
+        }
+
+        $('.time-row:not(.time-disabled)').click(function(e) {
+          e.preventDefault();
+          if (!$(this).hasClass('time-ua') && window.ajax_req == null) {
+            $('.time-row').removeClass('time-active');
+            $(this).addClass('time-active');
+            $('.cart_checkout_button').removeClass('disabled');
+            
+            var params = {};
+            
+            if ($('.recurrent-event').length == 1) {
+              var recurrent_event = $('.recurrent-event');
+            } else {
+              var recurrent_event = $('.recurrent-event:not(.disable)');
+            }
+            
+            if (recurrent_event != undefined) {
+              var r_uid = recurrent_event.data('uid');
+              var r_count = recurrent_event.find('select').val();
+              var timeslot_uid = $(this).data('uid');
+
+              if (r_uid != timeslot_uid) {
+                params = {
+                  'reset_uid': r_uid,
+                  'uid': timeslot_uid,
+                  'count': r_count + '',
+                  'comment': ''
+                };
+                bda_plone_cart.update_timeslot(params);
+              }
+            }
+          }
+        });
+      </script>
+    </div>
+
+
   </section>
+
+
 </section>
 </html>
