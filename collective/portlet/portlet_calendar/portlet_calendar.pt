@@ -83,7 +83,7 @@
     </table>
 
     <div class="event-listing table-time" tal:condition="view/date">
-      <p i18n:translate="choose_timeslot">Op welk tijdstip wil je het museum bezoeken?</p>
+      <p i18n:domain="bda.plone.cart" i18n:translate="choose_timeslot">Op welk tijdstip wil je het museum bezoeken?</p>
       <tal:occs tal:define="occs view/_get_occs">
         <tal:occ tal:repeat="occ occs">
           <div class="timeslot">
@@ -110,7 +110,12 @@
       <script>
         window.ajax_req = null;
         var stock_busy = 10;
-        var default_event_uid = "0c02168b45214f1ca581d9bd5aadbb6c";
+        if ($("body").hasClass("site-en")) {
+          var default_event_uid = "78adaf96e2974989a4227f89b1c24c85";
+        } else {
+          var default_event_uid = "0c02168b45214f1ca581d9bd5aadbb6c";
+        }
+        
         if ($('.recurrent-event').length == 1) {
           $('.recurrent-event').removeClass('disable');
         }
