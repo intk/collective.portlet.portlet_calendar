@@ -267,7 +267,7 @@ class Renderer(base.Renderer):
                             stock = 0
 
                         is_today = occ.start.date() == today
-                        
+
                         new_event = {
                             "start": occ.start,
                             "uid": occurrence_ticket.UID(),

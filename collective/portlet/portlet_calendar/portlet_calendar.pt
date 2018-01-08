@@ -83,7 +83,7 @@
     </table>
 
     <div class="event-listing table-time" tal:condition="view/date">
-      <p i18n:translate="choose_timeslot">Op welk tijdstip wil je het museum bezoeken?</p>
+      <p i18n:domain="bda.plone.cart" i18n:translate="choose_timeslot">Op welk tijdstip wil je het museum bezoeken?</p>
       <tal:occs tal:define="occs view/_get_occs">
         <tal:occ tal:repeat="occ occs">
           <div class="timeslot">
@@ -95,7 +95,7 @@
                                               ('time-busy' if occ['stock'] > 0 and occ['stock'] <= 10 else ''));
                                 data-uid python: occ['uid']; data-stock python: occ['stock'];"
                 tal:content="python: occ['start'].strftime('%H:%M')"></a>
-                <!--<p><span tal:content="python:occ['stock']"></span></p>-->
+                <p><span class="item-stock-overview" tal:content="python: ' %s beschikbaar' %(int(occ['stock'])) if getattr(context, 'language', 'nl') == 'nl' else '%s available' %(occ['stock'])" tal:on-error="nothing"></span></p>
             </tal:today>
             <tal:nottoday tal:condition="python: occ.get('is_today', '') == True">
               <a href="#"
@@ -110,10 +110,17 @@
       <script>
         window.ajax_req = null;
         var stock_busy = 10;
-        var default_event_uid = "0c02168b45214f1ca581d9bd5aadbb6c";
+
+        if ($("body").hasClass("site-en")) {
+          var default_event_uid = "78adaf96e2974989a4227f89b1c24c85";
+        } else {
+          var default_event_uid = "0c02168b45214f1ca581d9bd5aadbb6c";
+        }
+        
         if ($('.recurrent-event').length == 1) {
           $('.recurrent-event').removeClass('disable');
         }
+        
         var r_event = $('.recurrent-event:not(.disable)');
         var r_event_uid = $(r_event).data('uid');
         var r_count = $(r_event).find('select').val();
@@ -124,26 +131,29 @@
           } else if ($(this).data('stock') - parseInt(r_count) <= stock_busy) {
             $(this).addClass('time-busy');
           } else {
-
           }
         });
+
+        var coupon_code = $('.cart_couponcode').val();
 
         if (r_event_uid != default_event_uid) {
           var r_next_params = {
             'uid': default_event_uid,
             'reset_uid': r_event_uid,
             'count': r_count + '',
-            'comment': ''
+            'comment': '',
+            'coupon': coupon_code
           }
           bda_plone_cart.update_timeslot(r_next_params);
         }
 
         $('.time-row:not(.time-disabled)').click(function(e) {
           e.preventDefault();
+          var coupon_code = $('.cart_couponcode').val();
+
           if (!$(this).hasClass('time-ua') && window.ajax_req == null) {
             $('.time-row').removeClass('time-active');
             $(this).addClass('time-active');
-            $('.cart_checkout_button').removeClass('disabled');
             
             var params = {};
             
@@ -163,7 +173,8 @@
                   'reset_uid': r_uid,
                   'uid': timeslot_uid,
                   'count': r_count + '',
-                  'comment': ''
+                  'comment': '',
+                  'coupon': coupon_code
                 };
                 bda_plone_cart.update_timeslot(params);
               }
