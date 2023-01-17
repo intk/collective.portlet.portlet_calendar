@@ -7,7 +7,7 @@ from plone.app.event.base import _prepare_range
 from plone.app.event.base import expand_events
 from plone.app.event.base import first_weekday
 from plone.app.event.base import get_events, construct_calendar
-from plone.app.event.base import localized_today
+from plone.app.event.base import localized_today, localized_now
 from plone.app.event.base import start_end_query
 from plone.app.event.base import wkday_to_mon1
 from plone.app.event.portlets import get_calendar_url
@@ -35,6 +35,13 @@ from plone.app.event.base import RET_MODE_ACCESSORS
 from plone.app.event.base import guess_date_from
 from bda.plone.ticketshop.interfaces import ITicketOccurrenceData
 from bda.plone.ticketshop.interfaces import ITicket
+import plone.api
+from plone.app.event.base import default_timezone
+
+from zope.component import getMultiAdapter
+
+from bda.plone.cart import readcookie, extractitems
+from bda.plone.cart import get_catalog_brain
 
 try:
     from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
@@ -51,6 +58,24 @@ except ImportError:
     ICollection = None
 
 PLMF = MessageFactory('plonelocales')
+
+
+
+def localized_date(context=None, date=None):
+    """Return the current datetime localized to the default timezone.
+    :param context: Context object.
+    :type context: Content object
+    :returns: Localized current datetime.
+    :rtype: Python datetime
+    """
+    if not date:
+        return None
+
+    tzinfo = default_timezone(context=context, as_tzinfo=True)
+    try:
+        return date.replace(tzinfo=tzinfo)
+    except:
+        return date.replace(tzinfo=tzinfo)
 
 
 class ICalendarPortlet(IPortletDataProvider):
@@ -141,6 +166,7 @@ class Renderer(base.Renderer):
         self.next_query = '?month=%s&year=%s' % (next_month, next_year)
 
         self.cal = calendar.Calendar(first_weekday())
+
         self._ts = getToolByName(context, 'translation_service')
         self.month_name = PLMF(
             self._ts.month_msgid(month),
@@ -151,6 +177,7 @@ class Renderer(base.Renderer):
         strftime_wkdays = [
             wkday_to_mon1(day) for day in self.cal.iterweekdays()
         ]
+
         self.weekdays = [
             PLMF(self._ts.day_msgid(day, format='s'),
                  default=self._ts.weekday_english(day, format='a'))
@@ -171,9 +198,9 @@ class Renderer(base.Renderer):
         # Or use current date
         today = localized_today(context)
         if not year:
-            year = today.year
+            year = 2023
         if not month:
-            month = today.month
+            month = datetime.datetime.today().month
 
         # try to transform to number but fall back to current
         # date if this is ambiguous
@@ -196,10 +223,11 @@ class Renderer(base.Renderer):
 
         # Or use current date
         today = localized_today(context)
+        
         if not year:
-            year = today.year
+            year = 2023
         if not month:
-            month = today.month
+            month = datetime.datetime.today().month
 
         # try to transform to number but fall back to current
         # date if this is ambiguous
@@ -236,18 +264,51 @@ class Renderer(base.Renderer):
         html = f.read()
         return html
 
+    @property
+    def total_items_cart(self):
+        cart_items = self.get_cart_items()
+        total_count = 0
+        
+        for uid, count, comment, coupon in cart_items:
+            brain = get_catalog_brain(self.context, uid)
+            if brain.portal_type == 'product':
+                total_count += count
+
+        return total_count
+
+    def is_past(self, occ):
+        try:
+            occ_start_date = occ.get('start', '')
+            occ_end_date = occ.get('end', '')
+
+            if '11:00' in occ_start_date.strftime('%H:%M') and '17:00' in occ_end_date.strftime('%H:%M'):
+                return False
+
+            datetime_now = datetime.datetime.now()
+            return localized_date(self.context, datetime_now) > localized_date(self.context, occ_start_date)
+        except:
+            return False
+
+    def get_cart_items(self):
+        cart_items = extractitems(readcookie(self.request))
+        return cart_items
+
     def _get_occs(self):
+
         date = guess_date_from(self.date)
+
         if date:
             start, end = start_end_from_mode('day', date, self.context)
             query = {}
-            query['review_state'] = self.data.state
+
+            #query['review_state'] = self.data.state
             
             search_base_path = self.search_base_path
             if search_base_path:
                 query['path'] = {'query': search_base_path}
 
             list_events = []
+
             events = get_events(self.context, start=start, end=end, sort='start', sort_reverse=False, ret_mode=RET_MODE_OBJECTS, expand=True, **query)
 
             today = datetime.datetime.today().date()
@@ -270,6 +331,7 @@ class Renderer(base.Renderer):
 
                         new_event = {
                             "start": occ.start,
+                            "end": occ.end,
                             "uid": occurrence_ticket.UID(),
                             "stock": stock,
                             "is_today": is_today
@@ -291,6 +353,7 @@ class Renderer(base.Renderer):
   
                         new_event = {
                             "start": occ.start,
+                            "end": occ.end,
                             "uid": occurrence_ticket.UID(),
                             "stock": stock,
                             "is_today": is_today
@@ -313,6 +376,7 @@ class Renderer(base.Renderer):
         """
         context = aq_inner(self.context)
         today = localized_today(context)
+
         year, month = self.year_month_display()
         monthdates = [dat for dat in self.cal.itermonthdates(year, month)]
 
@@ -327,6 +391,7 @@ class Renderer(base.Renderer):
         events = []
         query.update(self.request.get('contentFilter', {}))
         search_base = self.search_base
+        
         if ICollection and ICollection.providedBy(search_base):
             # Whatever sorting is defined, we're overriding it.
             query = queryparser.parseFormquery(
@@ -354,12 +419,20 @@ class Renderer(base.Renderer):
             search_base_path = self.search_base_path
             if search_base_path:
                 query['path'] = {'query': search_base_path}
+            
+            #start = "2020-06-01"
             events = get_events(context, start=start, end=end,
                                 ret_mode=RET_MODE_OBJECTS,
                                 expand=True, **query)
 
+        
         #today += datetime.timedelta(days=1)
+        #today = datetime.date(2021, 6, 5)
+        #cal_dict_start = construct_calendar(events, start=datetime.date(2020, 11, 4), end=datetime.date(2020, 11, 4))
         cal_dict = construct_calendar(events, start=today, end=end)
+        #cal_dict = {}
+        #cal_dict.update(cal_dict_start)
+        #cal_dict.update(cal_dict_end)
 
         # [[day1week1, day2week1, ... day7week1], [day1week2, ...]]
         caldata = [[]]
@@ -402,23 +475,33 @@ class Renderer(base.Renderer):
                  'events': date_events})
         return caldata
 
+    def get_language(self):
+        """
+        @return: Two-letter string, the active language code
+        """
+        context = self.context.aq_inner
+        portal_state = getMultiAdapter((context, self.request), name=u'plone_portal_state')
+        current_language = portal_state.language()
+        return current_language
+
     def nav_pattern_options(self, year, month):
         return json.dumps({
-            'url': '%s/@@render-portlet?portlethash=%s&year=%s&month=%s' % (
-                getSite().absolute_url(),
+            'url': '%s/%s/@@render-portlet?portlethash=%s&year=%s&month=%s' % (
+                getSite().absolute_url(), self.get_language(),
                 self.hash,
                 year, month),
             'target': '#portletwrapper-%s > *' % self.hash
         })
 
     def _nav_pattern_options_date(self, year, month, date):
-        return json.dumps({
-            'url': '%s/@@render-portlet?portlethash=%s&year=%s&month=%s&date=%s' % (
-                getSite().absolute_url(),
+        result = json.dumps({
+            'url': '%s/%s/@@render-portlet?portlethash=%s&year=%s&month=%s&date=%s' % (
+                getSite().absolute_url(), self.get_language(),
                 self.hash,
                 year, month, date),
             'target': '#portletwrapper-%s > *' % self.hash
         })
+        return result
 
     @property
     def hash(self):

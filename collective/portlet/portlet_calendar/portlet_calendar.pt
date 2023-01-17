@@ -7,7 +7,8 @@
     tal:define="navigation_root_url context/@@plone_portal_state/navigation_root_url;
                 month view/month;
                 year view/year;">
-  <p class="visit-msg" i18n:domain="bda.plone.cart" i18n:translate="calendar_pre_text">Wanneer wil je <span class="lorentz-span">De Lorentz Formule</span> in het Lorentz Lab beleven?</p>
+  
+  <h2 class="visit-msg" i18n:domain="bda.plone.cart" i18n:translate="select_a_date">Kies een datum</h2>
 
   <header class="portletHeader">
     <a href="#" rel="nofollow" class="calendarPrevious pat-contentloader" title="Previous month"
@@ -82,105 +83,59 @@
       </tbody>
     </table>
 
-    <div class="event-listing table-time" tal:condition="view/date">
-      <p i18n:domain="bda.plone.cart" i18n:translate="choose_timeslot">Op welk tijdstip wil je het museum bezoeken?</p>
-      <tal:occs tal:define="occs view/_get_occs">
-        <tal:occ tal:repeat="occ occs">
-          <div class="timeslot">
-            <tal:today tal:condition="python: occ.get('is_today', '') == False">
-              <a href="#"
-                tal:attributes="class python:'time-row %s %s %s' %
-                                              (('time-ua' if occ['stock'] == 0 else ''),
-                                              ('time-free' if occ['stock'] > 10 else ''),
-                                              ('time-busy' if occ['stock'] > 0 and occ['stock'] <= 10 else ''));
-                                data-uid python: occ['uid']; data-stock python: occ['stock'];"
-                tal:content="python: occ['start'].strftime('%H:%M')"></a>
-                <p><span class="item-stock-overview" tal:content="python: ' %s beschikbaar' %(int(occ['stock'])) if getattr(context, 'language', 'nl') == 'nl' else '%s available' %(occ['stock'])" tal:on-error="nothing"></span></p>
-            </tal:today>
-            <tal:nottoday tal:condition="python: occ.get('is_today', '') == True">
-              <a href="#"
-                tal:attributes="class python:'time-row time-ua time-disabled';
-                                data-uid python: occ['uid']; data-stock python: occ['stock'];"
-                tal:content="python: occ['start'].strftime('%H:%M')"></a>
-            </tal:nottoday>
-          </div>
-        </tal:occ>
-      </tal:occs>
+    <script>
+      $("#ajax-spinner").hide();
+
+      $("td.event.cal_has_events").click(function(e) {
+        $("td.event.cal_has_events.selected.today").removeClass("selected");
+        $("td.event.cal_has_events.today").removeClass("today");
+
+        $(this).addClass("selected");
+        $(this).addClass("today");
+
+        $(".portletCalendar div.event-listing.table-time").hide();
+        $("#ajax-spinner").show();
+
+        $(".portlet-calendar-dates-form input.cart_checkout_button").attr("disabled", "disabled");
+      });
+
+      $(".calendarPrevious, .calendarNext").click(function(e) {
+        $(".portlet-calendar-dates-form input.cart_checkout_button").attr("disabled", "disabled");
+      });
+    </script>
+
+
+    <div class="event-listing table-time" tal:condition="view/date" aria-lable="Selecteer een starttijd">
+      <p i18n:domain="bda.plone.cart" i18n:translate="choose_timeslot" class="timeslots-header">Op welk tijdstip wil je het museum bezoeken?</p>
+        
+
+        <ul class="block-time-picker">
+
+          <tal:occs tal:define="occs view/_get_occs;
+                                total_items_cart view/total_items_cart;">
+            <tal:occ tal:repeat="occ occs">
+
+              <li class="time-slot" tal:define="is_timeslot_past python: view.is_past(occ)">
+              <input type="radio" name="timeslotId" tal:attributes="value python: occ['uid']; id python: 'block-time-%s' %(occ['uid']);disabled python: 'disabled' if occ['stock'] == 0 or total_items_cart > occ['stock'] and occ['stock'] != None or is_timeslot_past else ''"/>
+              <label for="" tal:attributes="for python: 'block-time-%s' %(occ['uid']);" tal:content="python: '%s' %(occ['start'].strftime('%H:%M')) if '17:00' not in occ['end'].strftime('%H:%M') else '%s - %s' %(occ['start'].strftime('%H:%M'), occ['end'].strftime('%H:%M'))"></label>
+
+              <span class="timeslot-availability" tal:content="python: '%s' %(int(occ['stock']))" tal:condition="python: is_timeslot_past == False and int(occ['stock']) < 100" tal:on-error="nothing"></span> <span i18n:domain="bda.plone.cart" i18n:translate="timeslot_available" tal:condition="python: is_timeslot_past == False and int(occ['stock']) < 100">beschikbaar</span>
+          </li>
+            </tal:occ>
+          </tal:occs>
+
+        </ul>
+
 
       <script>
         window.ajax_req = null;
-        var stock_busy = 10;
-        
-        if ($("body").hasClass("site-en")) {
-          var default_event_uid = "78adaf96e2974989a4227f89b1c24c85";
-        } else {
-          var default_event_uid = "0c02168b45214f1ca581d9bd5aadbb6c";
-        }
-        
-        if ($('.recurrent-event').length == 1) {
-          $('.recurrent-event').removeClass('disable');
-        }
-        
-        var r_event = $('.recurrent-event:not(.disable)');
-        var r_event_uid = $(r_event).data('uid');
-        var r_count = $(r_event).find('select').val();
-        
-        $('.time-row:not(.time-ua)').each(function() {
-          if (parseInt(r_count) > $(this).data('stock')) {
-            $(this).addClass('time-ua');
-          } else if ($(this).data('stock') - parseInt(r_count) <= stock_busy) {
-            $(this).addClass('time-busy');
-          } else {
-          }
-        });
 
-        var coupon_code = $('.cart_couponcode').val();
-
-        if (r_event_uid != default_event_uid) {
-          var r_next_params = {
-            'uid': default_event_uid,
-            'reset_uid': r_event_uid,
-            'count': r_count + '',
-            'comment': '',
-            'coupon': coupon_code
-          }
-          bda_plone_cart.update_timeslot(r_next_params);
-        }
-
-        $('.time-row:not(.time-disabled)').click(function(e) {
-          e.preventDefault();
-          var coupon_code = $('.cart_couponcode').val();
-
-          if (!$(this).hasClass('time-ua') && window.ajax_req == null) {
-            $('.time-row').removeClass('time-active');
-            $(this).addClass('time-active');
-            
-            var params = {};
-            
-            if ($('.recurrent-event').length == 1) {
-              var recurrent_event = $('.recurrent-event');
-            } else {
-              var recurrent_event = $('.recurrent-event:not(.disable)');
+        $(".portlet-calendar-dates-form .time-slot input[type='radio']").on("change", function() { 
+            if ($(this).val() != undefined) {
+                $(".portlet-calendar-dates-form input.cart_checkout_button").removeAttr("disabled");
             }
-            
-            if (recurrent_event != undefined) {
-              var r_uid = recurrent_event.data('uid');
-              var r_count = recurrent_event.find('select').val();
-              var timeslot_uid = $(this).data('uid');
-
-              if (r_uid != timeslot_uid) {
-                params = {
-                  'reset_uid': r_uid,
-                  'uid': timeslot_uid,
-                  'count': r_count + '',
-                  'comment': '',
-                  'coupon': coupon_code
-                };
-                bda_plone_cart.update_timeslot(params);
-              }
-            }
-          }
         });
+        
       </script>
     </div>
 
