@@ -198,7 +198,7 @@ class Renderer(base.Renderer):
         # Or use current date
         today = localized_today(context)
         if not year:
-            year = 2023
+            year = datetime.datetime.today().year
         if not month:
             month = datetime.datetime.today().month
 
@@ -225,7 +225,7 @@ class Renderer(base.Renderer):
         today = localized_today(context)
         
         if not year:
-            year = 2023
+            year = datetime.datetime.today().year
         if not month:
             month = datetime.datetime.today().month
 
